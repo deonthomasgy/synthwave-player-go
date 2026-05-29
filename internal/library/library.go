@@ -29,7 +29,7 @@ type Service struct {
 }
 
 type Broadcaster interface {
-	BroadcastStatus()
+	BroadcastStatusUpdate(st models.LoadingStatus)
 	BroadcastLibrary()
 	BroadcastConfig()
 	BroadcastLyrics(songID, lyrics string)
@@ -49,6 +49,7 @@ func NewService(database *db.DB, cfg *config.Store, logger *slog.Logger, hub Bro
 }
 
 func (s *Service) LoadingStatus() models.LoadingStatus {
+	s.reconcileReadyState()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st := s.loading
@@ -65,11 +66,12 @@ func (s *Service) SetLoading(st models.LoadingStatus) {
 	s.isLoading = !st.Done
 	s.mu.Unlock()
 	if s.Hub != nil {
-		s.Hub.BroadcastStatus()
+		s.Hub.BroadcastStatusUpdate(st)
 	}
 }
 
 func (s *Service) IsLibraryReady() bool {
+	s.reconcileReadyState()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.loading.Done
@@ -77,6 +79,11 @@ func (s *Service) IsLibraryReady() bool {
 
 func (s *Service) StartBackground() {
 	go func() {
+		// Mark ready immediately when the DB already reflects a complete library,
+		// so /api/status and /api/library are usable before sync finishes.
+		s.resetStaleScanState()
+		s.reconcileReadyState()
+
 		time.Sleep(time.Duration(1+time.Now().UnixNano()%2) * time.Second)
 		// A leftover "scanning" status from a previous process (e.g. interrupted
 		// scan) is stale: the goroutine that set it died with that process. Reset
@@ -136,13 +143,64 @@ func (s *Service) backfillBitrate() {
 
 func (s *Service) resetStaleScanState() {
 	var status string
-	_ = s.DB.QueryRow(`SELECT value FROM scan_state WHERE key = 'scan_status'`).Scan(&status)
-	if status == "scanning" {
+	var ts int64
+	_ = s.DB.QueryRow(`SELECT value, timestamp FROM scan_state WHERE key = 'scan_status'`).Scan(&status, &ts)
+	if status != "scanning" {
+		return
+	}
+	var pending int
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM scan_state WHERE (key LIKE 'task:%' OR key LIKE 'purge_task:%') AND value = 'pending'`).Scan(&pending)
+	var unscanned int
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM configured_directories WHERE status != 'scanned'`).Scan(&unscanned)
+	// Clear a stale lock left by a crashed process, or when another instance died
+	// mid-sync but left no real work behind.
+	if (pending == 0 && unscanned == 0) || ts < time.Now().Unix()-120 {
 		_, _ = s.DB.Exec(`UPDATE scan_state SET value = 'idle', timestamp = 0 WHERE key = 'scan_status'`)
 		if s.Logger != nil {
 			s.Logger.Info("reset stale 'scanning' state from previous run")
 		}
 	}
+}
+
+// reconcileReadyState marks the library ready when the database shows no pending
+// scan work, even if in-memory status was never updated (e.g. sync early-return).
+func (s *Service) reconcileReadyState() bool {
+	var scanStatus string
+	var scanTS int64
+	_ = s.DB.QueryRow(`SELECT value, timestamp FROM scan_state WHERE key = 'scan_status'`).Scan(&scanStatus, &scanTS)
+
+	var pending int
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM scan_state WHERE (key LIKE 'task:%' OR key LIKE 'purge_task:%') AND value = 'pending'`).Scan(&pending)
+	var unscanned int
+	_ = s.DB.QueryRow(`SELECT COUNT(*) FROM configured_directories WHERE status != 'scanned'`).Scan(&unscanned)
+
+	ready := pending == 0 && unscanned == 0 && (scanStatus == "idle" || scanStatus == "")
+	if !ready && pending == 0 && unscanned == 0 && scanStatus == "scanning" {
+		// Stale scanning flag with nothing to do.
+		if scanTS < time.Now().Unix()-120 {
+			_, _ = s.DB.Exec(`UPDATE scan_state SET value = 'idle', timestamp = 0 WHERE key = 'scan_status'`)
+			ready = true
+		}
+	}
+
+	if !ready {
+		return false
+	}
+
+	s.mu.Lock()
+	changed := !s.loading.Done
+	s.loading.Done = true
+	s.loading.Message = "Ready"
+	if s.loading.Progress < 100 && s.loading.Total == 0 {
+		s.loading.Progress = 100
+	}
+	st := s.loading
+	s.mu.Unlock()
+
+	if changed && s.Hub != nil {
+		s.Hub.BroadcastStatusUpdate(st)
+	}
+	return changed
 }
 
 func friendURLs(friends []config.FriendMusic) []string {
@@ -163,6 +221,7 @@ func (s *Service) SyncLibraryToConfig(oldDirs, newDirs, oldFriends, newFriends [
 	_ = tx.QueryRow(`SELECT value, timestamp FROM scan_state WHERE key = 'scan_status'`).Scan(&status, &ts)
 	if status == "scanning" && ts > time.Now().Unix()-900 {
 		tx.Rollback()
+		s.reconcileReadyState()
 		return nil
 	}
 	_, _ = tx.Exec(`UPDATE scan_state SET value = 'scanning', timestamp = ? WHERE key = 'scan_status'`, time.Now().Unix())
@@ -223,6 +282,7 @@ func (s *Service) SyncLibraryToConfig(oldDirs, newDirs, oldFriends, newFriends [
 	}
 	if len(toPurge) == 0 && len(toScan) == 0 {
 		_, _ = s.DB.Exec(`UPDATE scan_state SET value = 'idle', timestamp = 0 WHERE key = 'scan_status'`)
+		s.reconcileReadyState()
 		go s.parsePlaylists(true)
 		return nil
 	}

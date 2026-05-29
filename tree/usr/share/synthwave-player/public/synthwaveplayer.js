@@ -1224,8 +1224,8 @@ document.addEventListener('alpine:init', () => {
             document.body.style.overscrollBehaviorY = 'contain';
 
             this.showSetInitialPasswordModal = window.SWP_CONFIG.showSetInitialPasswordModal;
-            this.playerA = this.$refs.playerA;
-            this.playerB = this.$refs.playerB;
+            this.playerA = this.$refs.playerA || document.getElementById('audio-player-A');
+            this.playerB = this.$refs.playerB || document.getElementById('audio-player-B');
             
             // Small delay to ensure session cookies are processed by the browser
             setTimeout(() => this.initWebSocket(), 500);
@@ -1953,7 +1953,7 @@ document.addEventListener('alpine:init', () => {
                             }
                         }
                     }
-                    if (data.event === 'status_update') {
+                    if (data.event === 'status_update' && data.status) {
                         this.loading = !data.status.done;
                         this.loadingMessage = data.status.message;
                         this.loadingProgress = data.status.progress;
@@ -1964,6 +1964,9 @@ document.addEventListener('alpine:init', () => {
                                this.loadInitialData();
                            }
                         }
+                    }
+                    if (data.event === 'status') {
+                        this.checkLoadingStatus();
                     }
                 } catch (e) {
                     console.error('Error parsing WebSocket message:', e);
@@ -2282,13 +2285,30 @@ document.addEventListener('alpine:init', () => {
             try {
                 const res = await fetch('/api/status');
                 if (!res.ok) throw new Error(`Server status check failed: ${res.statusText}`);
-                const status = await res.json();
+                let status = await res.json();
+
+                // If status lags but the library already has songs, proceed anyway.
+                if (!status.done) {
+                    this._statusPolls = (this._statusPolls || 0) + 1;
+                    if (this._statusPolls >= 4) {
+                        try {
+                            const libRes = await fetch('/api/library?limit=1');
+                            if (libRes.ok) {
+                                const lib = await libRes.json();
+                                if (lib.songs && lib.songs.length > 0) {
+                                    status = { done: true, message: 'Ready', progress: 100 };
+                                }
+                            }
+                        } catch (_) { /* keep polling */ }
+                    }
+                }
 
                 this.loading = !status.done;
                 this.loadingMessage = status.message;
                 this.loadingProgress = (status.total > 0 && status.progress) ? status.progress : 0;
 
                 if (status.done) {
+                    this._statusPolls = 0;
                     if (this.allSongs.length === 0) {
                         this.loadInitialData(); // Load actual data after library is done
                     }

@@ -218,6 +218,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.Hub.Add(c)
 	defer s.Hub.Remove(c)
 	s.Hub.SendVersion(c)
+	s.Hub.SendStatusUpdate(c, s.Library.LoadingStatus())
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	go func() {

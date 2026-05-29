@@ -171,17 +171,7 @@ func (s *Service) VerifyIntegrity() int {
 }
 
 func (s *Service) checkIdle() {
-	var status string
-	_ = s.DB.QueryRow(`SELECT value FROM scan_state WHERE key = 'scan_status'`).Scan(&status)
-	if status == "idle" {
-		s.mu.Lock()
-		s.loading.Done = true
-		s.loading.Message = "Ready"
-		s.mu.Unlock()
-		if s.Hub != nil {
-			s.Hub.BroadcastStatus()
-		}
-	}
+	s.reconcileReadyState()
 }
 
 func (s *Service) DeepRescan() {

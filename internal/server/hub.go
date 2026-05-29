@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/Elive/synthwave-player/internal/config"
+	"github.com/Elive/synthwave-player/internal/models"
 	"github.com/coder/websocket"
 )
 
@@ -46,7 +47,13 @@ func (h *Hub) broadcast(v interface{}) {
 	}
 }
 
-func (h *Hub) BroadcastStatus()  { h.broadcast(map[string]string{"event": "status"}) }
+func (h *Hub) BroadcastStatusUpdate(st models.LoadingStatus) {
+	h.broadcast(map[string]interface{}{"event": "status_update", "status": st})
+}
+
+func (h *Hub) SendStatusUpdate(c *websocket.Conn, st models.LoadingStatus) {
+	h.send(c, map[string]interface{}{"event": "status_update", "status": st})
+}
 func (h *Hub) BroadcastLibrary() { h.broadcast(map[string]string{"event": "library_updated"}) }
 func (h *Hub) BroadcastConfig()  { h.broadcast(map[string]string{"event": "config_updated"}) }
 

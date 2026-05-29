@@ -39,10 +39,11 @@
     <script src="/menu-popup.js?v=<%= $app_version %>"></script>
     <script defer src="/alpinejs.min.js?v=<%= $app_version %>"></script>
     <link rel="stylesheet" href="/synthwaveplayer.css?v=<%= $app_version %>">
+    <link rel="stylesheet" href="/wmp10.css?v=<%= $app_version %>">
 </head>
 <body x-data="musicPlayer()" x-init="init()" @contextmenu.prevent
     @visibilitychange.window="if (document.hidden) { userPausedDisc = true } else { userPausedDisc = false }"
-    class="select-none antialiased" :class="{'effects-disabled': !enableVisualEffects, 'modal-open': isModalOpen}"
+    class="select-none antialiased theme-wmp10" :class="{'effects-disabled': !enableVisualEffects, 'modal-open': isModalOpen}"
     style="--font-size-desktop: <%= $ui_font_size_desktop %>;
            --font-size-mobile: <%= $ui_font_size_mobile %>;
            --ui-font-family: '<%= $ui_font_family %>';
@@ -59,6 +60,16 @@
             </linearGradient>
         </defs>
     </svg>
+    <audio id="audio-player-A" x-ref="playerA" preload="none"
+           @timeupdate="activePlayerRef === 'A' && updateProgress()"
+           @ended="activePlayerRef === 'A' && playNext(false)"
+           @loadedmetadata="onLoadedMetadata($event, 'A')"
+           @error="handleAudioError('A')"></audio>
+    <audio id="audio-player-B" x-ref="playerB" preload="none"
+           @timeupdate="activePlayerRef === 'B' && updateProgress()"
+           @ended="activePlayerRef === 'B' && playNext(false)"
+           @loadedmetadata="onLoadedMetadata($event, 'B')"
+           @error="handleAudioError('B')"></audio>
     <!-- Viral Discovery Banner -->
     <% if (!$is_private_network) { %>
     <div x-show="viralBannerVisible" x-cloak
@@ -320,9 +331,31 @@
         <div class="loading-spinner"></div>
     </div>
 
-    <div class="flex flex-col h-screen h-[100dvh]">
+    <div class="flex flex-col h-screen h-[100dvh]" x-data="{ wmpView: 'library' }">
+        <!-- WMP10 (Luna) window chrome -->
+        <div class="wmp-chrome">
+            <div class="wmp-titlebar">
+                <span class="wmp-title"><%= $website_title %> - Windows Media Player</span>
+                <div class="wmp-winbtns">
+                    <button class="wmp-min" title="Minimize">&#8211;</button>
+                    <button class="wmp-max" title="Maximize">&#9633;</button>
+                    <button class="wmp-close" title="Close">&#10005;</button>
+                </div>
+            </div>
+            <div class="wmp-menubar">
+                <span>File</span><span>View</span><span>Play</span><span>Tools</span><span>Help</span>
+            </div>
+            <div class="wmp-tabs">
+                <button class="wmp-tab" :class="{'wmp-tab-active': wmpView==='nowplaying'}" @click="wmpView='nowplaying'">Now Playing</button>
+                <button class="wmp-tab" :class="{'wmp-tab-active': wmpView==='library'}" @click="wmpView='library'">Library</button>
+                <button class="wmp-tab" @click="wmpView='library'">Rip</button>
+                <button class="wmp-tab" @click="wmpView='library'">Burn</button>
+                <button class="wmp-tab" @click="wmpView='library'">Sync</button>
+                <button class="wmp-tab wmp-tab-guide" @click="wmpView='library'">Guide</button>
+            </div>
+        </div>
         <!-- Main Content -->
-        <main class="flex-grow flex flex-col overflow-hidden">
+        <main class="flex-grow flex flex-col overflow-hidden" x-show="wmpView==='library'">
             <!-- Header -->
             <header class="page-header flex flex-col md:flex-row justify-between items-center mb-4 relative z-20 px-4 md:px-6 lg:px-8 pt-4 md:pt-5 lg:pt-6">
                 <h1 class="header-title text-3xl md:text-5xl font-bold neon-text-pink mb-4 md:mb-0"><%= $website_title %></h1>
@@ -758,23 +791,53 @@
             </div>
         </main>
 
+        <!-- WMP10 Now Playing view -->
+        <section class="wmp-nowplaying" x-show="wmpView==='nowplaying'" x-cloak>
+            <div class="wmp-np-visual">
+                <canvas id="wmp-visualizer"></canvas>
+                <div class="wmp-np-info" x-show="currentSong">
+                    <img class="wmp-np-cover"
+                         :src="currentSong ? (currentSong.is_radio ? '/coverart-fallback-radio.webp' : (!songsWithNoCover.has(currentSong.id) ? '/cover/' + currentSong.id : '/coverart-fallback.webp')) : '/coverart-fallback.webp'"
+                         @error="if (currentSong) songsWithNoCover.add(currentSong.id)" alt="">
+                    <div class="wmp-np-meta">
+                        <div class="wmp-np-title" x-text="currentSong ? currentSong.title : ''"></div>
+                        <div class="wmp-np-artist" x-text="currentSong ? currentSong.artist : ''"></div>
+                        <div class="wmp-np-album" x-text="currentSong ? [currentSong.album, currentSong.genre].filter(Boolean).join(' \u2014 ') : ''"></div>
+                    </div>
+                </div>
+                <div class="wmp-np-info wmp-np-stopped" x-show="!currentSong">
+                    <div class="wmp-np-title">Stopped</div>
+                    <div class="wmp-np-artist">Select a track to begin playback.</div>
+                </div>
+            </div>
+            <div class="wmp-np-list">
+                <div class="wmp-np-list-header">
+                    <span>Now Playing</span>
+                    <span class="wmp-np-list-count" x-text="filteredSongs.length + ' item' + (filteredSongs.length === 1 ? '' : 's')"></span>
+                </div>
+                <ul class="wmp-np-list-body" @scroll="menuPopup.hide()">
+                    <template x-for="(song, index) in songsToDisplay" :key="song.id + '-' + index">
+                        <li @click="handleSongClick(index, $event)"
+                            @contextmenu.prevent="openMenu('context', $event, { type: 'song', data: song })"
+                            class="wmp-np-row"
+                            :class="{ 'wmp-np-current': currentSong && currentSong.id === song.id }">
+                            <span class="wmp-np-row-title" x-text="song.title"></span>
+                            <span class="wmp-np-row-time" x-text="formatTime(song.duration)"></span>
+                        </li>
+                    </template>
+                </ul>
+                <div class="wmp-np-list-footer">
+                    <span x-text="filteredSongs.length + ' item' + (filteredSongs.length === 1 ? '' : 's')"></span>
+                    <span x-text="formatTime(filteredSongs.reduce((a, s) => a + ((s && s.duration && s.duration < 999999990) ? s.duration : 0), 0))"></span>
+                </div>
+            </div>
+        </section>
 
         <!-- Player Bar -->
         <footer x-show="canListen" class="footer-player fixed bottom-0 left-0 right-0 h-auto lg:h-40 glassmorphism p-4 border-t-2 border-fuchsia-500/50 z-[9999]"
                 @touchstart="handleTouchStart($event)"
                 @touchend="handleTouchEnd($event)"
                 :class="{'is-playing': discVisible, 'is-expanded': mobilePlayerExpanded}">
-            <audio id="audio-player-A" x-ref="playerA" preload="none"
-                   @timeupdate="activePlayerRef === 'A' && updateProgress()"
-                   @ended="activePlayerRef === 'A' && playNext(false)"
-                   @loadedmetadata="onLoadedMetadata($event, 'A')"
-                   @error="handleAudioError('A')"></audio>
-            <audio id="audio-player-B" x-ref="playerB" preload="none"
-                   @timeupdate="activePlayerRef === 'B' && updateProgress()"
-                   @ended="activePlayerRef === 'B' && playNext(false)"
-                   @loadedmetadata="onLoadedMetadata($event, 'B')"
-                   @error="handleAudioError('B')"></audio>
-
             <div class="flex flex-col lg:flex-row h-full w-full">
                 <!-- Mobile Player Layout -->
                 <div class="lg:hidden flex flex-col w-full h-full">
@@ -1241,5 +1304,6 @@ window.SWP_CONFIG = {
 };
 </script>
 <script src="/synthwaveplayer.js?v=<%= $app_version %>"></script>
+<script src="/wmp-nowplaying.js?v=<%= $app_version %>"></script>
 </body>
 </html>
