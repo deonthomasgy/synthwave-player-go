@@ -3,7 +3,7 @@ Section: sound
 Priority: optional
 Maintainer: Thanatermesis <thanatermesis@elivecd.org>
 Standards-Version: 4.6.2
-Homepage: https://github.com/Elive/synthwave-player
+Homepage: https://github.com/deonthomasgy/synthwave-player-go
 Build-Depends: debhelper (>= 12),
                golang-go (>= 2:1.21~),
                file,

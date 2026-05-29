@@ -5,7 +5,9 @@
 
 Simply put, this is the **most enjoyable** music player ever made. It is not just a player, is a masterpiece.
 
-This self-hosted, open-source web player streams your personal music collection with a stunning synthwave/retrowave aesthetic that transforms your listening experience. It converts your library into a private, distraction-free streaming service, putting you in complete control.
+This self-hosted, open-source web player streams your personal music collection with a stunning synthwave/retrowave aesthetic (including an optional Windows Media Player 10 “Luna” theme) that transforms your listening experience. It converts your library into a private, distraction-free streaming service, putting you in complete control.
+
+The server is implemented in **Go** (SQLite library index, embedded web UI). The legacy Perl/Mojolicious backend has been removed from this repository.
 
 <!-- Intro Image -->
 <a href="https://raw.githubusercontent.com/Elive/synthwave-player/refs/heads/main/media/synthwave-player-multiple-interfaces.webp" target="_blank">
@@ -68,7 +70,7 @@ For real music lovers, a self-hosted player isn't just a preference—it's a nec
 
 
 ### 📚 Library Management & Organization
--   **Zero-Setup Rhythmbox Integration:** Automatically discovers and parses your existing `rhythmdb.xml` database, instantly loading all songs, metadata, ratings, and playlists (`.pls`, `.m3u`, `.m3u8`). It even stays in sync with your library changes. _(NOTE: Rhythmbox dependency will be removed in a future version for a standalone engine)._
+-   **Standalone music library:** Point the server at one or more folders (`MUSIC_DIRECTORIES` in `server-config.json`). It scans audio files, stores metadata in a local SQLite database, and rescans when directories change. Playlist files (`.pls`, `.m3u`, `.m3u8`) in configured playlist directories are imported automatically.
 -   **Powerful Filtering & Sorting:**
     - Create on-the-fly views by combining filters for **multiple genres**, **multiple playlists**, and **star ratings**.
     - Selections within a category (e.g., two Genres) act as an **OR** filter, while selections across categories (e.g., a Genre and an Artist) act as an **AND** filter.
@@ -96,8 +98,8 @@ For real music lovers, a self-hosted player isn't just a preference—it's a nec
 
 
 ### ✨ User Experience & Interface
--   **Stunning Synthwave & Retrowave UI:** A beautiful, responsive interface with a neon-style aesthetic, micro-animations, glossy cover art effects, and an animated header/footer.
--   **Dynamic Visualizer:** When a song with cover art plays, the album cover slides out to reveal a spinning vinyl disc with a subtle, cycling neon glow.
+-   **Stunning Synthwave & Retrowave UI:** A beautiful, responsive interface with a neon-style aesthetic, micro-animations, glossy cover art effects, and an animated header/footer. An optional **WMP10 Luna** skin adds a classic Windows Media Player layout with a **Now Playing** view, click-to-cycle visualizers, and a 10-band graphic equalizer.
+-   **Dynamic Visualizer:** When a song with cover art plays, the album cover slides out to reveal a spinning vinyl disc with a subtle, cycling neon glow (synthwave theme). The Now Playing view includes spectrum bars, oscilloscope, and related visualizer modes.
 
 https://github.com/user-attachments/assets/c422dc7f-b973-452b-8cc1-ce991e1a2b6a
 
@@ -157,7 +159,7 @@ https://github.com/user-attachments/assets/c422dc7f-b973-452b-8cc1-ce991e1a2b6a
 </p>
 
 ### 🚀 System, Performance & Security
--   **High-Performance & Lightweight:** Built on a non-blocking asynchronous architecture, the server handles hundreds of simultaneous streams with minimal resource usage (as little as 50MB of RAM). It scales to massive libraries by intelligently loading and rendering songs in batches.
+-   **High-Performance & Lightweight:** The Go server uses a compact SQLite index and efficient HTTP/WebSocket stack. It scales to large libraries by loading songs in pages and scanning directories in the background with minimal RAM use.
 <p align="center">
   <img src="media/synthwave-player-low-resources.png" alt="Low resource usage" width="30%">
 </p>
@@ -207,13 +209,23 @@ Go to the *Releases* section and download the latest `.deb` package for your sys
 ### Installation
 
 1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/deonthomasgy/synthwave-player-go.git
+    cd synthwave-player-go
+    ```
 
-2.  **Build the Go server** (requires Go 1.21+):
+2.  **Build the Go server** (requires Go 1.26+):
     ```bash
     make build
     ```
 
-    Optional runtime tools (recommended): `eyed3`, `file`
+    Required runtime tool: `file` (used to verify audio paths). Optional: `eyed3` (better lyrics/tag fallback), `exiftool`.
+
+3.  **Configure the server** (first run creates defaults under `~/.config/synthwave-player/`):
+    ```bash
+    mkdir -p ~/.config/synthwave-player
+    # Edit server-config.json — set MUSIC_DIRECTORIES to your library paths
+    ```
 
 ### Running the Server
 There are several ways to run the player. For initial testing, it's best to run it in the foreground to watch for logs and errors.
@@ -327,7 +339,7 @@ Nginx will act as a reverse proxy, securely forwarding traffic from the standard
         ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
         location / {
-            # Forward requests to your Perl application
+            # Forward requests to the Synthwave Player server
             proxy_pass http://127.0.0.1:8160;
 
             # Set headers for WebSocket support and to pass client info
@@ -448,10 +460,41 @@ Some ideas / TODO to implement:
 -   **User Authentication:** Optional username/password protection to restrict access to your player.
 -   **User Statistics:** Track listening habits and see stats on a per-user basis.
 -   **User-based liked system**: Allow users to like (hearth) the songs, saving them in ther username login, and display the total ratings average too.
--   **Windows / MacOS / Docker Support:** Set up this player running it from a docker so you can install it on windows or mac too.
+-   **Windows / MacOS / Docker Support:** Docker packaging is available; see [docs/DOCKER.md](docs/DOCKER.md) and [examples/docker-run.sh](examples/docker-run.sh).
 -   **UI**: The disc should not spin, but instead it should remain in place and rotate a few pixels back and forth to simulate the record spinning. This will require to separate the reflection with the disc image (2 images), the disc should spin and the reflection should whobble back-and-forth
 
 
+
+---
+
+## Project layout
+
+| Path | Purpose |
+|------|---------|
+| `cmd/synthwave-player-server/` | Go server entrypoint |
+| `internal/` | Library scanner, HTTP API, config, search |
+| `tree/usr/share/synthwave-player/public/` | Frontend assets (JS, CSS) |
+| `tree/usr/share/synthwave-player/templates/` | HTML templates (`.ep`, rendered at runtime) |
+| `tree/usr/bin/synthwave-player-server` | Bash launcher (Avahi, `--stop`, port from config) |
+| `Dockerfile` | Multi-stage container image |
+| `examples/docker-run.sh` | Production Docker example (Tailscale tsdproxy) |
+
+Config and database (runtime, not in the repo):
+
+- `~/.config/synthwave-player/server-config.json` — settings and music paths
+- `~/.cache/synthwave-player/library.db` — scanned library index
+
+---
+
+## Docker
+
+Build and run the Go server in a container:
+
+```bash
+docker build -t synthwave-player-go:latest .
+```
+
+For a production-style `docker run` example (Tailscale **tsdproxy** labels, host music/config/cache mounts), see **[examples/docker-run.sh](examples/docker-run.sh)** and **[docs/DOCKER.md](docs/DOCKER.md)**.
 
 ---
 

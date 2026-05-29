@@ -1,0 +1,12 @@
+.git
+.github
+debian
+*.md
+media
+synthwave-player-server
+tree/usr/share/synthwave-player/lib
+tree/usr/share/synthwave-player/synthwave-player-server
+tree/usr/bin
+**/.cursor
+**/agent-transcripts
+**/uploads
