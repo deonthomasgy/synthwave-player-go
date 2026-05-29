@@ -63,6 +63,7 @@
     var eqMaster = null;             // GainNode feeding destination + analyser
     var eqSources = {};              // element -> MediaElementAudioSourceNode
     var eqPanel = null;              // DOM control panel
+    var eqOverlay = false;           // force the panel over any visualizer mode
 
     function loadEqGains() {
         try {
@@ -575,8 +576,20 @@
 
     function syncEqPanel() {
         if (!eqPanel) return;
-        eqPanel.style.display = (mode === 'eq') ? 'flex' : 'none';
+        eqPanel.style.display = (mode === 'eq' || eqOverlay) ? 'flex' : 'none';
     }
+
+    // Exposed so the transport-bar EQ button can overlay the panel over any mode.
+    window.wmpToggleEqPanel = function () {
+        eqOverlay = !eqOverlay;
+        syncEqPanel();
+        return eqOverlay;
+    };
+    window.wmpSetEqPanel = function (on) {
+        eqOverlay = !!on;
+        syncEqPanel();
+        return eqOverlay;
+    };
 
     function cycleMode() {
         mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
