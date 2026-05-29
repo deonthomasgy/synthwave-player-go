@@ -19,7 +19,7 @@ jobs:
     - name: Install build dependencies
       run: |
         apt-get update
-        apt-get install -y devscripts equivs build-essential
+        apt-get install -y devscripts equivs build-essential golang-go
         mk-build-deps -i -t "apt-get -y --no-install-recommends" debian/control
 
     - name: Build packages

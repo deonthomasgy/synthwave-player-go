@@ -936,10 +936,23 @@ document.addEventListener('alpine:init', () => {
             setTimeout(() => { this.removeNotification(id); }, duration);
         },
         async _hashPassword(password) {
-            const msgUint8 = new TextEncoder().encode(password);
-            const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-            const hashArray = Array.from(new Uint8Array(hashBuffer));
-            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            const canUseSubtle = typeof crypto !== 'undefined' && crypto.subtle
+                && (typeof window === 'undefined' || window.isSecureContext);
+            if (canUseSubtle) {
+                try {
+                    const msgUint8 = new TextEncoder().encode(password);
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                } catch (e) {
+                    console.warn('crypto.subtle failed', e);
+                }
+            }
+            // On HTTP via LAN IP, browsers block crypto.subtle. Server hashes plaintext on private networks only.
+            if (window.SWP_CONFIG && window.SWP_CONFIG.is_private_network) {
+                return password;
+            }
+            throw new TypeError('digest: use HTTPS, localhost, or your LAN address');
         },
         removeNotification(id) {
             const index = this.notifications.findIndex(n => n.id === id);
@@ -988,7 +1001,7 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (e) {
                 if (e instanceof TypeError && e.message.includes('digest')) {
-                    this.initialPasswordError = 'Security Error: Browser blocked encryption. Use HTTPS, or login via http://127.0.0.1 (localhost).';
+                    this.initialPasswordError = 'Security Error: Use HTTPS, http://127.0.0.1, or open the player from your local network (not the public internet).';
                 } else {
                     this.initialPasswordError = 'An error occurred.';
                 }
@@ -1026,7 +1039,7 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (e) {
                 if (e instanceof TypeError && e.message.includes('digest')) {
-                    this.adminLoginError = 'Security Error: Browser blocked encryption. Use HTTPS, or login via http://127.0.0.1 (localhost).';
+                    this.adminLoginError = 'Security Error: Use HTTPS, http://127.0.0.1, or open the player from your local network (not the public internet).';
                 } else {
                     this.adminLoginError = 'An error occurred during login.';
                 }

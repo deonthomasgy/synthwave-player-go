@@ -1,6 +1,22 @@
 #!/usr/bin/make -f
 
 export DH_VERBOSE=1
+export GOPATH=$(CURDIR)/debian/go
+export GOCACHE=$(CURDIR)/debian/gocache
 
 %:
 	dh $@
+
+override_dh_auto_build:
+	go build -ldflags="-s -w" -o synthwave-player-server ./cmd/synthwave-player-server
+
+override_dh_auto_install:
+	dh_auto_install
+	install -D -m 755 synthwave-player-server debian/synthwave-player-server/usr/lib/synthwave-player/synthwave-player-server
+	rm -rf debian/synthwave-player-server/usr/share/synthwave-player/lib
+	rm -f debian/synthwave-player-server/usr/share/synthwave-player/synthwave-player-server
+
+override_dh_auto_clean:
+	dh_auto_clean
+	rm -f synthwave-player-server
+	rm -rf debian/go debian/gocache

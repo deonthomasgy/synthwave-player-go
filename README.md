@@ -208,42 +208,33 @@ Go to the *Releases* section and download the latest `.deb` package for your sys
 
 1.  **Clone the repository**:
 
-2.  **Install the required Perl modules.**
-
-    You can use `cpanm` (you might need to install it first, e.g., `sudo apt-get install cpanminus`):
+2.  **Build the Go server** (requires Go 1.21+):
     ```bash
-    sudo cpanm Mojolicious Net::UPnP XML::LibXML MP3::Tag File::HomeDir Digest::SHA Try::Tiny
+    make build
     ```
 
-    **Alternatively, for Debian 13 (Trixie) and derivatives:**
-    You can install most dependencies directly from the system's package manager, which is often faster and better integrated.
-    ```bash
-    sudo apt-get update
-    sudo apt-get install libmojolicious-perl libnet-upnp-perl libxml-libxml-perl libmp3-tag-perl libfile-homedir-perl libdigest-sha-perl libtry-tiny-perl
-    ```
-
-3.  **Make the script executable:**
-    ```bash
-    chmod +x synthwave-player
-    ```
+    Optional runtime tools (recommended): `eyed3`, `file`
 
 ### Running the Server
 There are several ways to run the player. For initial testing, it's best to run it in the foreground to watch for logs and errors.
 
-**1. Foreground Mode (for testing)**
-To see live log output, run the server in the foreground. It will run until you stop it with `Ctrl+C`.
+Set `SYNTHWAVE_BASE` to the share directory when running from a git checkout:
 ```bash
-hypnotoad --foreground synthwave-player
+export SYNTHWAVE_BASE="$(pwd)/tree/usr/share/synthwave-player"
 ```
 
-**2. Background Daemon Mode**
-To start the player and have it run in the background, detached from your terminal:
+**1. Foreground Mode (for testing)**
 ```bash
-hypnotoad synthwave-player
+./synthwave-player-server --port 8160 --foreground
 ```
-To stop the background server:
+
+**2. Using the launcher script**
 ```bash
-hypnotoad --stop synthwave-player
+./tree/usr/bin/synthwave-player-server --foreground
+```
+To stop:
+```bash
+./tree/usr/bin/synthwave-player-server --stop
 ```
 
 ### Accessing the Player
@@ -393,7 +384,7 @@ A cron job can start the player at boot. This is easy to set up but won't restar
 
 2.  Add the following line, making sure to use the absolute path to the script.
     ```bash
-    @reboot hypnotoad /home/your_username/path/to/music-player/synthwave-player
+    @reboot /usr/bin/synthwave-player-server --daemon
     ```
 
 **Option B: Run as a Systemd Service (Recommended)**

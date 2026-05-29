@@ -1,0 +1,10 @@
+/synthwave-player-server
+*.deb
+debian/go/
+debian/gocache/
+debian/*.substvars
+debian/*.debhelper
+debian/files
+debian/synthwave-player-server/
+debian/synthwave-player/
+debian/.debhelper/

@@ -515,7 +515,7 @@ sub _get_default_config_values {
     return {
         USER_FULL_NAME => '',
         MUSIC_DIRECTORIES => \@music_dirs,
-        WELCOME_MESSAGE => 'Fsck Spotify',
+        WELCOME_MESSAGE => '',
         UI_FONT_FAMILY => 'Roboto',
         UI_FONT_SIZE_DESKTOP => '1.00em',
         UI_FONT_SIZE_MOBILE => '0.95em',

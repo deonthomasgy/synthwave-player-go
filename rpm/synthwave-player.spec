@@ -18,17 +18,9 @@ web interface.
 
 %package -n synthwave-player-server
 Summary:        A music player server with a synthwave-themed web interface
-Requires:       perl-Mojolicious
-Requires:       perl-File-HomeDir
-Requires:       perl-XML-LibXML
-Requires:       perl-MP3-Tag
-Requires:       perl-Digest-SHA
-Requires:       perl-URI
-Requires:       perl-Net-UPnP
-Requires:       perl-Try-Tiny
-Requires:       perl-MIME-Base64
-Requires:       perl-Linux-Inotify2
+BuildRequires:  golang
 Requires:       file
+Requires:       eyed3
 
 %description -n synthwave-player-server
 A music player server with a synthwave-themed web interface. It scans your
@@ -38,39 +30,44 @@ It supports playlists, cover art, and UPnP for remote access.
 %prep
 %setup -q -n tree
 
+%build
+cd ..
+go build -ldflags="-s -w" -o tree/synthwave-player-server ./cmd/synthwave-player-server
+cd tree
+
 %install
-# Main application files
-mkdir -p %{buildroot}%{_datadir}/%{name}
-cp -r usr/share/%{name}/* %{buildroot}%{_datadir}/%{name}/
+mkdir -p %{buildroot}%{_libdir}/synthwave-player
+install -m 755 synthwave-player-server %{buildroot}%{_libdir}/synthwave-player/synthwave-player-server
 
-# Executables
+mkdir -p %{buildroot}%{_datadir}/synthwave-player
+cp -r usr/share/synthwave-player/public %{buildroot}%{_datadir}/synthwave-player/
+cp -r usr/share/synthwave-player/templates %{buildroot}%{_datadir}/synthwave-player/
+
 mkdir -p %{buildroot}%{_bindir}
-install -m 755 usr/bin/%{name} %{buildroot}%{_bindir}/%{name}
-install -m 755 usr/bin/%{name}-server %{buildroot}%{_bindir}/%{name}-server
+install -m 755 usr/bin/synthwave-player-server %{buildroot}%{_bindir}/synthwave-player-server
+install -m 755 usr/bin/synthwave-player %{buildroot}%{_bindir}/synthwave-player
 
-# Desktop file
 mkdir -p %{buildroot}%{_datadir}/applications
-cp usr/share/applications/%{name}.desktop %{buildroot}%{_datadir}/applications/
-cp usr/share/applications/%{name}-server.desktop %{buildroot}%{_datadir}/applications/
+cp usr/share/applications/synthwave-player.desktop %{buildroot}%{_datadir}/applications/
+cp usr/share/applications/synthwave-player-server.desktop %{buildroot}%{_datadir}/applications/
 
-# Icons
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/scalable/apps
-install -m 644 usr/share/%{name}/pixmaps/%{name}.png %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
-install -m 644 usr/share/%{name}/pixmaps/%{name}-rounded.png %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
-install -m 644 usr/share/%{name}/pixmaps/%{name}-server.png %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
-rm -rf %{buildroot}%{_datadir}/%{name}/pixmaps
+install -m 644 usr/share/synthwave-player/pixmaps/synthwave-player.png %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
+install -m 644 usr/share/synthwave-player/pixmaps/synthwave-player-rounded.png %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
+install -m 644 usr/share/synthwave-player/pixmaps/synthwave-player-server.png %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/
 
 %files
-%{_bindir}/%{name}
-%{_datadir}/applications/%{name}.desktop
-%{_datadir}/icons/hicolor/scalable/apps/%{name}.png
-%{_datadir}/icons/hicolor/scalable/apps/%{name}-rounded.png
+%{_bindir}/synthwave-player
+%{_datadir}/applications/synthwave-player.desktop
+%{_datadir}/icons/hicolor/scalable/apps/synthwave-player.png
+%{_datadir}/icons/hicolor/scalable/apps/synthwave-player-rounded.png
 
 %files -n synthwave-player-server
-%{_bindir}/%{name}-server
-%{_datadir}/%{name}
-%{_datadir}/applications/%{name}-server.desktop
-%{_datadir}/icons/hicolor/scalable/apps/%{name}-server.png
+%{_bindir}/synthwave-player-server
+%{_libdir}/synthwave-player/synthwave-player-server
+%{_datadir}/synthwave-player
+%{_datadir}/applications/synthwave-player-server.desktop
+%{_datadir}/icons/hicolor/scalable/apps/synthwave-player-server.png
 
 %changelog
 * Fri Aug 29 2025 Thanatermesis <thanatermesis@elivecd.org> - %{version}-1
