@@ -535,7 +535,12 @@ document.addEventListener('alpine:init', () => {
         displayedSongCount: 0,
         libraryPageToLoad: 1,
         isLoadingMoreSongs: false,
+        _fullListLoaded: false,
+        _cacheHydrated: false,
+        _cacheMeta: null,
+        _sidebarMetadataLoaded: false,
         activePlayerRef: 'A',
+        playEpoch: 0,
         playerA: null,
         playerB: null,
         playbackRate: 1.0,
@@ -775,9 +780,11 @@ document.addEventListener('alpine:init', () => {
 
         // Computed Properties
         get songsToDisplay() {
-            // Always use filteredSongs which properly creates highlighted properties
-            // and handles all shuffle modes correctly
-            return this.filteredSongs.filter(song => song).slice(0, this.displayLimit);
+            const filtered = this.filteredSongs.filter(song => song);
+            if (this._fullListLoaded) {
+                return filtered;
+            }
+            return filtered.slice(0, this.displayLimit);
         },
         get sortedPlaylists() {
             const playlistNames = Object.keys(this.playlists);
@@ -1632,7 +1639,9 @@ document.addEventListener('alpine:init', () => {
             document.documentElement.style.setProperty('--ui-scale', this.uiScale);
             document.documentElement.style.setProperty('--lyrics-scale', this.lyricsScale);
 
-            this.checkLoadingStatus(); // Will now primarily rely on WebSocket for continuous updates
+            this._loadTrackCacheFromStorage().then(() => {
+                this.checkLoadingStatus(); // Will now primarily rely on WebSocket for continuous updates
+            });
 
             // Watch for URL changes (like back/forward buttons) and ensure it stays pretty
             window.addEventListener('popstate', () => {
@@ -1915,10 +1924,21 @@ document.addEventListener('alpine:init', () => {
                         return;
                     }
                     if (data.event === 'library_updated') {
+                        this._cacheHydrated = false;
+                        this._fullListLoaded = false;
+                        this._sidebarMetadataLoaded = false;
+                        if (typeof SWPTrackCache !== 'undefined') {
+                            SWPTrackCache.clear(window.location.origin);
+                        }
                         this.loadInitialData();
                     }
                     if (data.event === 'library_purged') {
                         this.showNotification('Library synchronized: removed entries no longer in configuration.', 'info', null, 3000);
+                        this._cacheHydrated = false;
+                        this._fullListLoaded = false;
+                        if (typeof SWPTrackCache !== 'undefined') {
+                            SWPTrackCache.clear(window.location.origin);
+                        }
                         this.allSongs = [];
                         this.currentPlaylist = [];
                         this.displayedSongCount = 0;
@@ -1958,9 +1978,7 @@ document.addEventListener('alpine:init', () => {
                         this.loadingMessage = data.status.message;
                         this.loadingProgress = data.status.progress;
                         if (data.status.done) {
-                           // If library is done loading and we haven't loaded data yet, trigger it.
-                           // We check allSongs length to avoid redundant loads if already initialized.
-                           if (this.allSongs.length === 0) {
+                           if (!this._sidebarMetadataLoaded) {
                                this.loadInitialData();
                            }
                         }
@@ -1987,6 +2005,80 @@ document.addEventListener('alpine:init', () => {
             this.ws = ws;
         },
         _fuseIndex: null,
+        _rebuildFuseIndex() {
+            if (this.allSongs.length > 0) {
+                const options = {
+                    keys: ['title', 'artist', 'album', 'genre'],
+                    threshold: 0.3
+                };
+                this._fuseIndex = Fuse.createIndex(options.keys, this.allSongs);
+                this.fuse = new Fuse(this.allSongs, options, this._fuseIndex);
+            }
+        },
+        _expandDisplayToAll() {
+            this._fullListLoaded = true;
+            this.displayLimit = this.filteredSongs.length;
+        },
+        _hydrateFromCache(cached) {
+            const newSongs = cached.songs.map(s => {
+                s.is_radio = s.duration === 999999999;
+                return s;
+            });
+            this.allSongs = [...newSongs];
+            this.displayedSongCount = cached.total || newSongs.length;
+            this.libraryPageToLoad = 2;
+            this._rebuildFuseIndex();
+            this._expandDisplayToAll();
+            this.viewLoading = false;
+        },
+        async _loadTrackCacheFromStorage() {
+            if (typeof SWPTrackCache === 'undefined') return;
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('search') || urlParams.get('playlists') || urlParams.get('genres')
+                || urlParams.get('artists') || urlParams.get('albums') || urlParams.get('ratings')
+                || urlParams.get('shuffle')) {
+                return;
+            }
+            if (!SWPTrackCache.isDefaultView(this)) return;
+            const cached = await SWPTrackCache.load(window.location.origin);
+            if (!cached?.songs?.length) return;
+            this._cacheMeta = { total: cached.total, cachedAt: cached.cachedAt };
+            this._hydrateFromCache(cached);
+            this._cacheHydrated = true;
+        },
+        async _saveTrackCache(total) {
+            if (typeof SWPTrackCache === 'undefined') return;
+            if (!SWPTrackCache.isDefaultView(this)) return;
+            const entry = await SWPTrackCache.save(window.location.origin, {
+                songs: this.allSongs,
+                total: total ?? this.displayedSongCount,
+                sortCol: this.sortCol,
+                sortDir: this.sortDir,
+            });
+            if (entry) {
+                this._cacheMeta = { total: entry.total, cachedAt: entry.cachedAt };
+                this._cacheHydrated = true;
+            }
+        },
+        async _revalidateTrackCache() {
+            if (typeof SWPTrackCache === 'undefined') return;
+            if (!SWPTrackCache.isDefaultView(this)) return;
+            try {
+                let sortValue = window.SWP_CONFIG.default_sort_by;
+                if (window.SWP_CONFIG.default_sort_order && window.SWP_CONFIG.default_sort_order !== 'asc') {
+                    sortValue += `|${window.SWP_CONFIG.default_sort_order}`;
+                }
+                const res = await fetch(`${window.location.origin}/api/library?limit=1&page=1&sort=${encodeURIComponent(sortValue)}`);
+                if (!res.ok) return;
+                const { total } = await res.json();
+                const cachedTotal = this._cacheMeta?.total ?? SWPTrackCache.readMeta()?.total;
+                if (total !== cachedTotal || !this._cacheHydrated) {
+                    await this.fetchSongs(1, false);
+                }
+            } catch (e) {
+                console.warn('Track cache revalidation failed:', e);
+            }
+        },
         async fetchSongs(page = 1, append = false, signal = null) {
             if (this.isLoadingMoreSongs && !signal) return;
             this.isLoadingMoreSongs = true;
@@ -1998,13 +2090,16 @@ document.addEventListener('alpine:init', () => {
 
             const isSearch = (this.search || '').length > 0;
             let wasAborted = false;
+            const useBulkDefault = !isSearch && typeof SWPTrackCache !== 'undefined' && SWPTrackCache.isDefaultView(this);
 
             try {
                 const baseUrl = isSearch ? `${window.location.origin}/api/search` : `${window.location.origin}/api/library`;
                 const url = new URL(baseUrl);
                 url.searchParams.set('page', page);
-                
-                const limit = this.shuffle === 'random' ? 0 : (window.SWP_CONFIG.songs_per_page || 5000);
+
+                const limit = useBulkDefault
+                    ? SWPTrackCache.CACHE_LIMIT
+                    : (this.shuffle === 'random' ? 0 : (window.SWP_CONFIG.songs_per_page || 5000));
                 url.searchParams.set('limit', limit);
 
                 if (isSearch) {
@@ -2049,6 +2144,9 @@ document.addEventListener('alpine:init', () => {
                     this.allSongs = [...this.allSongs, ...newSongs];
                 } else {
                     this.allSongs = [...newSongs];
+                    if (!useBulkDefault) {
+                        this._fullListLoaded = false;
+                    }
                     this.resetView();
                 }
 
@@ -2058,18 +2156,16 @@ document.addEventListener('alpine:init', () => {
                     });
                 }
 
-                // Update Fuse index for v7.1.0
-                if (this.allSongs.length > 0) {
-                    const options = {
-                        keys: ['title', 'artist', 'album', 'genre'],
-                        threshold: 0.3
-                    };
-                    this._fuseIndex = Fuse.createIndex(options.keys, this.allSongs);
-                    this.fuse = new Fuse(this.allSongs, options, this._fuseIndex);
-                }
+                this._rebuildFuseIndex();
 
                 this.displayedSongCount = data.total || 0;
                 this.libraryPageToLoad = page + 1;
+
+                if (useBulkDefault && !append) {
+                    this._expandDisplayToAll();
+                    this.isLoadingMoreSongs = false;
+                    await this._saveTrackCache(data.total);
+                }
 
                 // Reset loading state if we've reached the end
                 if (newSongs.length === 0 || (data.total && this.allSongs.length >= data.total)) {
@@ -2181,7 +2277,14 @@ document.addEventListener('alpine:init', () => {
             }
 
             // This will handle search if `this.search` is set from URL params.
-            await this.fetchSongs();
+            const canUseCachedTracks = typeof SWPTrackCache !== 'undefined'
+                && SWPTrackCache.isDefaultView(this)
+                && this._cacheHydrated;
+            if (canUseCachedTracks) {
+                this._revalidateTrackCache();
+            } else {
+                await this.fetchSongs();
+            }
             this.loading = false;
             this.isInitializing = false;
 
@@ -2309,8 +2412,8 @@ document.addEventListener('alpine:init', () => {
 
                 if (status.done) {
                     this._statusPolls = 0;
-                    if (this.allSongs.length === 0) {
-                        this.loadInitialData(); // Load actual data after library is done
+                    if (!this._sidebarMetadataLoaded) {
+                        this.loadInitialData();
                     }
                 } else {
                     // If not done, poll again until WebSocket is connected and taking over, or if WebSocket fails.
@@ -2353,10 +2456,18 @@ document.addEventListener('alpine:init', () => {
                 this.albums = [];
 
                 // Now that basic metadata is loaded, finish parsing URL parameters and fetch songs.
+                this._sidebarMetadataLoaded = true;
                 if (this.isInitializing) {
                     this.finishLoading();
                 } else {
-                    await this.fetchSongs(1, false);
+                    const canUseCachedTracks = typeof SWPTrackCache !== 'undefined'
+                        && SWPTrackCache.isDefaultView(this)
+                        && this._cacheHydrated;
+                    if (canUseCachedTracks) {
+                        this._revalidateTrackCache();
+                    } else {
+                        await this.fetchSongs(1, false);
+                    }
                     await this.fetchSidebarData();
                 }
             } catch (e) {
@@ -2581,7 +2692,7 @@ document.addEventListener('alpine:init', () => {
                 // Ensure UI state is updated immediately
                 this.isPlaying = true;
                 this.discVisible = true;
-                this.playAudio({ manualSelection: true, isNewPlay: false });
+                this.playAudio({ epoch: ++this.playEpoch, manualSelection: true, isNewPlay: false });
             }
         },
         toggleFullscreenCover() {
@@ -2746,9 +2857,54 @@ document.addEventListener('alpine:init', () => {
                 });
             }
         },
+        waitForPlayable(audio, epoch) {
+            return new Promise((resolve, reject) => {
+                if (!audio) {
+                    reject(new Error('no audio element'));
+                    return;
+                }
+                const isStale = () => epoch !== this.playEpoch || audio !== this.getActivePlayer();
+                if (isStale()) {
+                    reject(new Error('stale play request'));
+                    return;
+                }
+                if (audio.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) {
+                    resolve();
+                    return;
+                }
+                const timeoutMs = 30000;
+                let timer = setTimeout(() => {
+                    cleanup();
+                    reject(new Error('media load timeout'));
+                }, timeoutMs);
+                const onReady = () => {
+                    if (isStale()) {
+                        cleanup();
+                        reject(new Error('stale play request'));
+                        return;
+                    }
+                    cleanup();
+                    resolve();
+                };
+                const onError = () => {
+                    cleanup();
+                    reject(audio.error || new Error('media element error'));
+                };
+                const cleanup = () => {
+                    clearTimeout(timer);
+                    audio.removeEventListener('canplay', onReady);
+                    audio.removeEventListener('loadeddata', onReady);
+                    audio.removeEventListener('error', onError);
+                };
+                audio.addEventListener('canplay', onReady, { once: true });
+                audio.addEventListener('loadeddata', onReady, { once: true });
+                audio.addEventListener('error', onError, { once: true });
+            });
+        },
         async playAudio(options = {}) {
             const manualSelection = options.manualSelection || false;
             const isNewPlay = options.isNewPlay || false;
+            const epoch = options.epoch != null ? options.epoch : this.playEpoch;
 
             if (!this.currentSong) return;
 
@@ -2760,36 +2916,27 @@ document.addEventListener('alpine:init', () => {
                 this.showNotification('Audio player not available.', 'error');
                 return;
             }
+            if (epoch !== this.playEpoch) return;
+
             if (this.currentSong && !this.currentSong.is_radio && !audio.src) {
                 audio.src = '/audio/' + this.currentSong.id;
                 audio.load();
             }
 
             const targetTime = this.autoplayStartTime;
-            if (targetTime > 0 && !this.currentSong.is_radio) {
-                audio.muted = true;
-                try {
-                    // Mute + Play + Pause + Seek
-                    await audio.play();
-                    audio.pause();
-                    audio.currentTime = targetTime;
-                } catch (e) {}
-            }
 
-            try {
-                await audio.play();
-
-                if (!this.currentSong || this.currentSong.id !== songToPlayId) { return; }
-
+            const applyPlaybackSuccess = () => {
+                if (epoch !== this.playEpoch || !this.currentSong || this.currentSong.id !== songToPlayId) {
+                    return;
+                }
                 if (targetTime > 0 && !this.currentSong.is_radio) {
                     this.autoplayStartTime = 0;
-                    // Check position immediately after play()
                     if (audio.currentTime < targetTime - 1) {
                         audio.currentTime = targetTime;
                     }
                     this.updateProgress();
-                    // Final check and unmute after a short delay
                     setTimeout(() => {
+                        if (epoch !== this.playEpoch) return;
                         if (audio.currentTime < targetTime - 1) {
                             audio.currentTime = targetTime;
                         }
@@ -2797,49 +2944,89 @@ document.addEventListener('alpine:init', () => {
                         audio.muted = this.muted;
                     }, 150);
                 }
-
                 if (isNewPlay && !this.currentSong.is_radio) {
                     this.updateSongStats(this.currentSong.id, 'play');
-                    // Reset background speed measurement for the new song
                     this._speedMeasureStart = Date.now();
                 }
-
                 if (this.streamLoadTimeout) {
                     clearTimeout(this.streamLoadTimeout);
                     this.streamLoadTimeout = null;
                 }
-                this.isPlaying = true; this.discVisible = true; this.audioUnlocked = true; this.preloadingSongId = null;
+                this.isPlaying = true;
+                this.discVisible = true;
+                this.audioUnlocked = true;
+                this.preloadingSongId = null;
                 if (this.isMobileDevice) { this.userPausedDisc = false; }
                 if (this.currentSong && !manualSelection) { this.scrollSongIntoView(this.currentSong.id); }
-
-                // Preload next song in background after current one starts
                 setTimeout(() => this.preloadNextSong(), 5000);
+            };
+
+            const attemptPlay = async () => {
+                await this.waitForPlayable(audio, epoch);
+                if (epoch !== this.playEpoch) return;
+                await audio.play();
+            };
+
+            if (targetTime > 0 && !this.currentSong.is_radio) {
+                audio.muted = true;
+                try {
+                    await this.waitForPlayable(audio, epoch);
+                    if (epoch !== this.playEpoch) return;
+                    await audio.play();
+                    audio.pause();
+                    audio.currentTime = targetTime;
+                } catch (e) {
+                    if (epoch !== this.playEpoch) return;
+                }
+            }
+
+            try {
+                await attemptPlay();
+                if (epoch !== this.playEpoch) return;
+                applyPlaybackSuccess();
             } catch (e) {
                 audio.muted = this.muted;
-                if (e.name === 'AbortError') {
-                    // This is a common and often benign error when a play() request is interrupted by another action (like loading a new song).
-                    // We can safely ignore it to prevent console noise.
-                    return;
-                }
+                if (epoch !== this.playEpoch) return;
+                if (e.name === 'AbortError') return;
                 if (!this.currentSong || this.currentSong.id !== songToPlayId) {
                     console.warn(`Playback for song ${songToPlayId} was aborted by a new request.`);
                     return;
                 }
 
-                this.isPlaying = false; this.preloadingSongId = null;
-                const timeSinceLastRequest = this.lastSongRequestTime ? Date.now() - this.lastSongRequestTime : (window.SWP_CONFIG.ignore_playback_errors_ms + 1);
-                if (timeSinceLastRequest < window.SWP_CONFIG.ignore_playback_errors_ms) {
-                    // This is likely due to quickly changing songs. User interrupted the last play action.
-                    // We can ignore this error and not show a notification.
+                const timeSinceLastRequest = this.lastSongRequestTime
+                    ? Date.now() - this.lastSongRequestTime
+                    : (window.SWP_CONFIG.ignore_playback_errors_ms + 1);
+                const isRapidSwitch = timeSinceLastRequest < window.SWP_CONFIG.ignore_playback_errors_ms;
+
+                if (isRapidSwitch) {
                     console.warn("Playback error suppressed, likely due to rapid song switching.", e);
-                } else {
-                    console.error("Audio playback error:", e, {
-                        currentSong: JSON.parse(JSON.stringify(this.currentSong || {})),
-                        activePlayerSrc: audio.src,
-                        audioError: audio.error
-                    });
-                    this.showNotification('An error occurred during playback.', 'error');
+                    try {
+                        await attemptPlay();
+                        if (epoch !== this.playEpoch) return;
+                        applyPlaybackSuccess();
+                    } catch (retryErr) {
+                        if (epoch !== this.playEpoch || retryErr.name === 'AbortError') return;
+                        const stillRapid = (Date.now() - (this.lastSongRequestTime || 0)) < window.SWP_CONFIG.ignore_playback_errors_ms;
+                        if (stillRapid) return;
+                        this.isPlaying = false;
+                        this.preloadingSongId = null;
+                        console.error("Audio playback error after retry:", retryErr, {
+                            activePlayerSrc: audio.src,
+                            audioError: audio.error
+                        });
+                        this.showNotification('An error occurred during playback.', 'error');
+                    }
+                    return;
                 }
+
+                this.isPlaying = false;
+                this.preloadingSongId = null;
+                console.error("Audio playback error:", e, {
+                    currentSong: JSON.parse(JSON.stringify(this.currentSong || {})),
+                    activePlayerSrc: audio.src,
+                    audioError: audio.error
+                });
+                this.showNotification('An error occurred during playback.', 'error');
             }
         },
         async updateMediaSession() {
@@ -3116,6 +3303,7 @@ document.addEventListener('alpine:init', () => {
                 this.playerB.load();
             }
 
+            const epoch = ++this.playEpoch;
             this.lastSongRequestTime = Date.now();
             if (this.currentSong && clickedSong && this.currentSong.id === clickedSong.id) {
                 this.userPausedDisc = false;
@@ -3128,10 +3316,10 @@ document.addEventListener('alpine:init', () => {
                         audio.pause();
                         audio.src = this.currentSong.location + "?" + Math.floor((Math.random() * 10000) + 1);
                         audio.load();
-                        this.playAudio({ manualSelection: true });
+                        this.playAudio({ epoch, manualSelection: true });
                     } else {
                         this.getActivePlayer().currentTime = 0;
-                        this.playAudio({ manualSelection: true });
+                        this.playAudio({ epoch, manualSelection: true });
                     }
                 }
                 return;
@@ -3189,7 +3377,7 @@ document.addEventListener('alpine:init', () => {
                 }
 
                 audio.playbackRate = this.playbackRate;
-                this.playAudio({ manualSelection: manualSelection, isNewPlay: true });
+                this.playAudio({ epoch, manualSelection: manualSelection, isNewPlay: true });
             } else {
                 this.preloadingSongId = null;
             }
@@ -3473,6 +3661,7 @@ document.addEventListener('alpine:init', () => {
             this.shuffleSeed = null;
             this.allSongs = [];
             this.libraryPageToLoad = 1;
+            this._fullListLoaded = false;
             this.displayLimit = this.isMobileMode ? window.SWP_CONFIG.initial_songs_to_load_mobile : window.SWP_CONFIG.initial_songs_to_load_desktop;
 
             if (this.sortCol === column) {
@@ -3619,6 +3808,7 @@ document.addEventListener('alpine:init', () => {
 
             this.allSongs = [];
             this.libraryPageToLoad = 1;
+            this._fullListLoaded = false;
             this.displayLimit = this.isMobileMode ? window.SWP_CONFIG.initial_songs_to_load_mobile : window.SWP_CONFIG.initial_songs_to_load_desktop;
             this.updateUrl();
             this.fetchSongs(1, false);
@@ -3657,13 +3847,19 @@ document.addEventListener('alpine:init', () => {
         },
         resetView(scrollTop = true) {
             if (this.menuPopup) this.menuPopup.hide();
-            this.playHistory = []; this.displayLimit = this.isMobileMode ? window.SWP_CONFIG.initial_songs_to_load_mobile : window.SWP_CONFIG.initial_songs_to_load_desktop;
+            this.playHistory = [];
+            if (this._fullListLoaded) {
+                this._expandDisplayToAll();
+            } else {
+                this.displayLimit = this.isMobileMode ? window.SWP_CONFIG.initial_songs_to_load_mobile : window.SWP_CONFIG.initial_songs_to_load_desktop;
+            }
             if (this.shuffle !== 'off') {
                 this.$nextTick(() => this.currentPlaylist = this.filteredSongs);
             }
             if (scrollTop) { this.$nextTick(() => { if (this.$refs.songListContainer) { this.$refs.songListContainer.scrollTop = 0; } }); }
         },
         handleScroll(e) {
+            if (this._fullListLoaded) return;
             const el = e.target;
             // Trigger when user is within 1000px of the bottom
             if (el.scrollHeight - el.scrollTop - el.clientHeight < 1000) {
@@ -3819,7 +4015,8 @@ document.addEventListener('alpine:init', () => {
             const nextSrc = '/audio/' + nextSong.id;
 
             // Don't re-cache if already set
-            if (inactivePlayer.src.includes(nextSong.id) || inactivePlayer._cachedSongId === nextSong.id) return;
+            const inactiveSrc = inactivePlayer.src || '';
+            if (inactiveSrc.includes(nextSong.id) || inactivePlayer._cachedSongId === nextSong.id) return;
 
             try {
                 const response = await fetch(nextSrc);
@@ -3829,10 +4026,16 @@ document.addEventListener('alpine:init', () => {
                 // Only blob-ify if it's a reasonable size (e.g., < 40MB) to avoid memory issues
                 if (size > 0 && size <= 40 * 1024 * 1024) {
                     const blob = await response.blob();
-                    if (inactivePlayer.src.startsWith('blob:')) URL.revokeObjectURL(inactivePlayer.src);
-                    inactivePlayer.src = URL.createObjectURL(blob);
-                    inactivePlayer._cachedSongId = nextSong.id;
-                    inactivePlayer.load();
+                    // Still the inactive element and blob not in use by active player
+                    if (inactivePlayer === this.getInactivePlayer()) {
+                        const oldBlob = inactivePlayer.src;
+                        if (oldBlob.startsWith('blob:') && this.getActivePlayer().src !== oldBlob) {
+                            URL.revokeObjectURL(oldBlob);
+                        }
+                        inactivePlayer.src = URL.createObjectURL(blob);
+                        inactivePlayer._cachedSongId = nextSong.id;
+                        inactivePlayer.load();
+                    }
                 }
             } catch (e) {
                 console.warn("Background preload failed:", e);

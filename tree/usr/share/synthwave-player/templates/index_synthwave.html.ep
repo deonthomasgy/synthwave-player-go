@@ -1322,8 +1322,10 @@ window.SWP_CONFIG = {
     show_playlists_out_of_date_warning: <%= $show_playlists_out_of_date_warning ? 'true' : 'false' %>,
     source_hash: '<%= $source_hash %>',
     current_user: '<%= session('user') || '' %>',
+    track_cache_limit: 10000,
 };
 </script>
+<script src="/track-cache.js?v=<%= $app_version %>"></script>
 <script src="/synthwaveplayer.js?v=<%= $app_version %>"></script>
 <script src="/wmp-nowplaying.js?v=<%= $app_version %>"></script>
 </body>
