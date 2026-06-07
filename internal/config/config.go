@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/adrg/xdg"
+	"github.com/Elive/synthwave-player/internal/storage/s3"
 )
 
 const AppVersion = "v3.6"
@@ -179,6 +180,23 @@ func (s *Store) Load(logger *slog.Logger) error {
 			needsSave = true
 			if logger != nil {
 				logger.Info("auto-configured playlist directories", "dirs", dirs)
+			}
+		}
+	}
+	if s3cfg := s3.ConfigFromEnv(); s3cfg.Enabled() {
+		s3URI := s3cfg.MusicURI()
+		hasS3 := false
+		for _, d := range loaded.MusicDirectories {
+			if s3.IsURI(d) {
+				hasS3 = true
+				break
+			}
+		}
+		if !hasS3 && os.Getenv("SYNTHWAVE_USE_S3_MUSIC") != "0" {
+			loaded.MusicDirectories = append(loaded.MusicDirectories, s3URI)
+			needsSave = true
+			if logger != nil {
+				logger.Info("auto-configured s3 music source", "uri", s3URI)
 			}
 		}
 	}

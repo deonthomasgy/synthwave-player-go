@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Elive/synthwave-player/internal/storage/s3"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -17,6 +18,9 @@ func (s *Service) StartWatchers() {
 		}
 	})
 	for _, dir := range st.MusicDirectories {
+		if s3.IsURI(dir) {
+			continue
+		}
 		d := dir
 		go watchMusicDir(d, s.Logger, func() {
 			time.AfterFunc(3*time.Second, func() {

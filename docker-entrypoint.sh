@@ -13,7 +13,18 @@ mkdir -p "${CONFIG_DIR}" "${XDG_CACHE_HOME}" 2>/dev/null || {
 }
 
 if [ ! -f "${CONFIG_FILE}" ]; then
-    cat > "${CONFIG_FILE}" <<'EOF'
+    if [ -n "${MINIO_ENDPOINT}" ] && [ -n "${MINIO_ACCESS_KEY}" ] && [ -n "${MINIO_SECRET_KEY}" ]; then
+        BUCKET="${MINIO_BUCKET:-music}"
+        cat > "${CONFIG_FILE}" <<EOF
+{
+  "MUSIC_DIRECTORIES": ["s3://${BUCKET}/"],
+  "SERVER_HOST": "0.0.0.0",
+  "SERVER_PORT": 8160,
+  "WEBSITE_TITLE": "Synthwave Player"
+}
+EOF
+    else
+        cat > "${CONFIG_FILE}" <<'EOF'
 {
   "MUSIC_DIRECTORIES": ["/music"],
   "SERVER_HOST": "0.0.0.0",
@@ -21,6 +32,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
   "WEBSITE_TITLE": "Synthwave Player"
 }
 EOF
+    fi
 fi
 
 exec /usr/lib/synthwave-player/synthwave-player-server "$@"

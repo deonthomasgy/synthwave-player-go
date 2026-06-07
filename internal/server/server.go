@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"github.com/Elive/synthwave-player/internal/network"
 	"github.com/Elive/synthwave-player/internal/paths"
 	"github.com/Elive/synthwave-player/internal/search"
+	"github.com/Elive/synthwave-player/internal/storage/s3"
 	"github.com/Elive/synthwave-player/internal/utils"
 	"github.com/alexedwards/scs/v2"
 	"github.com/coder/websocket"
@@ -357,6 +359,21 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) localSongPath(ctx context.Context, st config.Settings, full string) (string, error) {
+	path, err := utils.SafeSongPath(s.DB.DB, full, st.MusicDirectories)
+	if err != nil || path == "" {
+		return "", err
+	}
+	if s3.IsURI(path) {
+		client := s3.Default()
+		if client == nil {
+			return "", os.ErrNotExist
+		}
+		return s3.LocalCachePath(ctx, client, config.CacheDir(), path)
+	}
+	return path, nil
+}
+
 func (s *Server) handleCoverExists(w http.ResponseWriter, r *http.Request) {
 	if !s.rateLimit(w, r) {
 		return
@@ -368,7 +385,7 @@ func (s *Server) handleCoverExists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := s.Config.Get()
-	path, _ := utils.SafeSongPath(s.DB.DB, full, st.MusicDirectories)
+	path, _ := s.localSongPath(r.Context(), st, full)
 	if path == "" {
 		writeJSON(w, 200, map[string]int{"exists": 0})
 		return
@@ -396,7 +413,7 @@ func (s *Server) handleLyrics(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"lyrics": l})
 		return
 	}
-	path, _ := utils.SafeSongPath(s.DB.DB, full, st.MusicDirectories)
+	path, _ := s.localSongPath(r.Context(), st, full)
 	l := lyrics.GetLocal(st, path)
 	writeJSON(w, 200, map[string]interface{}{"lyrics": l})
 	if l == "" && st.EnableOnlineLyricsSearch {
@@ -430,6 +447,19 @@ func (s *Server) handleAudio(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if s3.IsURI(path) {
+		if r.URL.Query().Get("download") != "" {
+			local, err := s.localSongPath(r.Context(), st, full)
+			if err != nil || local == "" {
+				http.NotFound(w, r)
+				return
+			}
+			s.serveDownload(w, r, local)
+			return
+		}
+		s.serveS3Audio(w, r, path)
+		return
+	}
 	if r.URL.Query().Get("download") != "" {
 		s.serveDownload(w, r, path)
 		return
@@ -437,7 +467,58 @@ func (s *Server) handleAudio(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func (s *Server) serveS3Audio(w http.ResponseWriter, r *http.Request, uri string) {
+	loc, err := s3.ParseURI(uri)
+	if err != nil || !s3.ValidKey(loc.Key) {
+		http.NotFound(w, r)
+		return
+	}
+	st := s.Config.Get()
+	if !s3.Allowed(loc, st.MusicDirectories) {
+		http.NotFound(w, r)
+		return
+	}
+	client := s3.Default()
+	if client == nil {
+		http.NotFound(w, r)
+		return
+	}
+	stream, err := client.GetObject(r.Context(), loc.Bucket, loc.Key, r.Header.Get("Range"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer stream.Body.Close()
+	ctype := stream.ContentType
+	if ctype == "" {
+		ctype = s3.ContentTypeForKey(loc.Key)
+	}
+	w.Header().Set("Content-Type", ctype)
+	w.Header().Set("Accept-Ranges", "bytes")
+	if stream.Partial {
+		w.Header().Set("Content-Range", stream.ContentRange)
+		w.Header().Set("Content-Length", strconv.FormatInt(stream.ContentLength, 10))
+		w.WriteHeader(http.StatusPartialContent)
+	} else if stream.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(stream.ContentLength, 10))
+	}
+	_, _ = io.Copy(w, stream.Body)
+}
+
 func (s *Server) serveDownload(w http.ResponseWriter, r *http.Request, src string) {
+	if s3.IsURI(src) {
+		client := s3.Default()
+		if client == nil {
+			http.NotFound(w, r)
+			return
+		}
+		local, err := s3.LocalCachePath(r.Context(), client, config.CacheDir(), src)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		src = local
+	}
 	tmpDir := filepath.Join(config.CacheDir(), "downloads")
 	_ = os.MkdirAll(tmpDir, 0o755)
 	tmp, err := os.CreateTemp(tmpDir, "dl-*.mp3")
@@ -470,7 +551,7 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	path, _ := utils.SafeSongPath(s.DB.DB, full, st.MusicDirectories)
+	path, _ := s.localSongPath(r.Context(), st, full)
 	data, mime, ok := utils.CoverArt(path)
 	if !ok {
 		http.NotFound(w, r)
@@ -638,14 +719,18 @@ func (s *Server) handleUpdateTag(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	id := chi.URLParam(r, "id")
-	_, full, ok := s.Library.FindSongByPartialID(id)
+	song, full, ok := s.Library.FindSongByPartialID(id)
 	if !ok {
 		writeJSON(w, 200, map[string]interface{}{"success": 0, "message": "Song not found"})
 		return
 	}
+	if s3.IsURI(song.Location) {
+		writeJSON(w, 200, map[string]interface{}{"success": 0, "message": "Tag editing is not supported for S3-backed songs"})
+		return
+	}
 	st := s.Config.Get()
-	path, err := utils.SafeSongPath(s.DB.DB, full, st.MusicDirectories)
-	if err != nil {
+	path, err := s.localSongPath(r.Context(), st, full)
+	if err != nil || path == "" {
 		writeJSON(w, 500, map[string]interface{}{"success": 0, "message": "Could not access file"})
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/Elive/synthwave-player/internal/jsonutil"
 	"github.com/Elive/synthwave-player/internal/db"
 	"github.com/Elive/synthwave-player/internal/models"
+	"github.com/Elive/synthwave-player/internal/storage/s3"
 	"github.com/Elive/synthwave-player/internal/utils"
 )
 
@@ -232,6 +233,10 @@ func (s *Service) SyncLibraryToConfig(oldDirs, newDirs, oldFriends, newFriends [
 		if strings.HasPrefix(strings.ToLower(d), "http://") || strings.HasPrefix(strings.ToLower(d), "https://") {
 			continue
 		}
+		if s3.IsURI(d) {
+			newMap[s3.NormalizePrefix(d)] = true
+			continue
+		}
 		p, _ := utils.Realpath(d)
 		if p == "" {
 			p = filepath.Clean(d)
@@ -266,6 +271,9 @@ func (s *Service) SyncLibraryToConfig(oldDirs, newDirs, oldFriends, newFriends [
 			continue
 		}
 		norm := strings.TrimRight(old, "/")
+		if s3.IsURI(old) {
+			norm = s3.NormalizePrefix(old)
+		}
 		if !newMap[norm] {
 			toPurge = append(toPurge, norm)
 		}

@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Elive/synthwave-player/internal/storage/s3"
 )
 
 func Realpath(path string) (string, error) {
@@ -33,6 +35,16 @@ func SafeSongPath(db *sql.DB, id string, musicDirs []string) (string, error) {
 	}
 	if strings.Contains(location, "..") {
 		return "", os.ErrInvalid
+	}
+	if s3.IsURI(location) {
+		loc, err := s3.ParseURI(location)
+		if err != nil {
+			return "", os.ErrInvalid
+		}
+		if !s3.Allowed(loc, musicDirs) {
+			return "", os.ErrPermission
+		}
+		return location, nil
 	}
 	real, err := Realpath(location)
 	if err != nil || real == "" {
