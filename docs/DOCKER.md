@@ -24,9 +24,8 @@ On first start, the entrypoint creates `/home/synthwave/.config/synthwave-player
 See [`examples/docker-run.sh`](../examples/docker-run.sh) for a full example with:
 
 - Tailscale/tsdproxy labels for HTTPS funnel exposure
-- Music library mounted at the same path inside the container (`/mnt/share/640GB/Music_Deon`)
+- MinIO/S3 credentials for the music library (`s3://music/`)
 - Host config and cache bind-mounted into the container user paths
-- Host `server-config.json` and cache bind mounts (same layout as a native install)
 - `restart=always` and a custom Docker network
 
 ```bash
@@ -47,7 +46,7 @@ IMAGE=synthwave-player-go:latest ./examples/docker-run.sh
 | `~/.config/synthwave-player/` | `/home/synthwave/.config/synthwave-player/` |
 | `~/.cache/synthwave-player/` | `/home/synthwave/.cache/synthwave-player/` |
 
-`MUSIC_DIRECTORIES` in `server-config.json` must use **container** paths (e.g. `/mnt/share/640GB/Music_Deon`, not a host-only path).
+For S3-only deployments, set `MUSIC_DIRECTORIES` to `["s3://music/"]` (or your bucket URI) in `server-config.json`. No music volume mount is required.
 
 ### Ports
 

@@ -5,7 +5,7 @@
 
 Simply put, this is the **most enjoyable** music player ever made. It is not just a player, is a masterpiece.
 
-This self-hosted, open-source web player streams your personal music collection with a stunning synthwave/retrowave aesthetic (including an optional Windows Media Player 10 “Luna” theme) that transforms your listening experience. It converts your library into a private, distraction-free streaming service, putting you in complete control.
+This self-hosted, open-source web player streams your personal music collection with a stunning synthwave/retrowave aesthetic that transforms your listening experience. It converts your library into a private, distraction-free streaming service, putting you in complete control.
 
 The server is implemented in **Go** (SQLite library index, embedded web UI). The legacy Perl/Mojolicious backend has been removed from this repository.
 
@@ -98,8 +98,8 @@ For real music lovers, a self-hosted player isn't just a preference—it's a nec
 
 
 ### ✨ User Experience & Interface
--   **Stunning Synthwave & Retrowave UI:** A beautiful, responsive interface with a neon-style aesthetic, micro-animations, glossy cover art effects, and an animated header/footer. An optional **WMP10 Luna** skin adds a classic Windows Media Player layout with a **Now Playing** view, click-to-cycle visualizers, and a 10-band graphic equalizer.
--   **Dynamic Visualizer:** When a song with cover art plays, the album cover slides out to reveal a spinning vinyl disc with a subtle, cycling neon glow (synthwave theme). The Now Playing view includes spectrum bars, oscilloscope, and related visualizer modes.
+-   **Stunning Synthwave & Retrowave UI:** A beautiful, responsive interface with a neon-style aesthetic, micro-animations, glossy cover art effects, and an animated header/footer.
+-   **Dynamic Visualizer:** When a song with cover art plays, the album cover slides out to reveal a spinning vinyl disc with a subtle, cycling neon glow.
 
 https://github.com/user-attachments/assets/c422dc7f-b973-452b-8cc1-ce991e1a2b6a
 

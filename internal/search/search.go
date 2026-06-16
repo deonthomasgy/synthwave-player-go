@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -196,6 +197,27 @@ func str(v interface{}) string {
 	}
 }
 
+func folderPath(location string) string {
+	if i := strings.LastIndex(location, "/"); i > 0 {
+		return location[:i]
+	}
+	return location
+}
+
+func sortSongsByFolder(songs []models.Song, sortDir string) {
+	desc := strings.EqualFold(sortDir, "desc")
+	sort.SliceStable(songs, func(i, j int) bool {
+		fi, fj := folderPath(songs[i].Location), folderPath(songs[j].Location)
+		if fi != fj {
+			if desc {
+				return fi > fj
+			}
+			return fi < fj
+		}
+		return utils.NaturalCompare(songs[i].Title, songs[j].Title) < 0
+	})
+}
+
 func ProcessSongs(db *sql.DB, cfg config.Settings, r *http.Request, ids []string, matches map[string]map[string]string, disableSort, preserveOrder bool) models.LibraryResult {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 1)
@@ -205,7 +227,7 @@ func ProcessSongs(db *sql.DB, cfg config.Settings, r *http.Request, ids []string
 	if sp := q.Get("sort"); sp != "" {
 		re := regexp.MustCompile(`^(\w+)(?:\|(asc|desc))?$`)
 		if m := re.FindStringSubmatch(strings.ToLower(sp)); len(m) > 0 {
-			valid := map[string]bool{"title": true, "artist": true, "album": true, "genre": true, "duration": true, "rating": true, "track_number": true, "bitrate": true}
+			valid := map[string]bool{"title": true, "artist": true, "album": true, "genre": true, "duration": true, "rating": true, "track_number": true, "bitrate": true, "folder": true}
 			if valid[m[1]] {
 				sortBy = m[1]
 			}
@@ -262,12 +284,29 @@ func ProcessSongs(db *sql.DB, cfg config.Settings, r *http.Request, ids []string
 		}
 		countQ := "SELECT COUNT(*) FROM songs WHERE " + where
 		_ = db.QueryRow(countQ, args...).Scan(&total)
-		order := sortBy + " " + strings.ToUpper(sortDir)
-		if !disableSort {
-			args = append(args, limit, (page-1)*limit)
-			rows, err := db.Query("SELECT * FROM songs WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", args...)
+		if !disableSort && sortBy == "folder" {
+			rows, err := db.Query("SELECT * FROM songs WHERE "+where, args...)
 			if err == nil {
-				songs = scanSongs(rows)
+				all := scanSongs(rows)
+				sortSongsByFolder(all, sortDir)
+				start := (page - 1) * limit
+				if start > len(all) {
+					start = len(all)
+				}
+				end := start + limit
+				if end > len(all) {
+					end = len(all)
+				}
+				songs = all[start:end]
+			}
+		} else {
+			order := sortBy + " " + strings.ToUpper(sortDir)
+			if !disableSort {
+				args = append(args, limit, (page-1)*limit)
+				rows, err := db.Query("SELECT * FROM songs WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", args...)
+				if err == nil {
+					songs = scanSongs(rows)
+				}
 			}
 		}
 	}
