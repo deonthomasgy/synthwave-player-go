@@ -63,7 +63,7 @@ Pass MinIO credentials as container environment variables. When all three are se
 ```bash
 docker run -d --name synthwave-player \
   -p 8160:8160 \
-  -e MINIO_ENDPOINT=http://truenas-scale.sphinx-butterfly.ts.net:9000 \
+  -e MINIO_ENDPOINT=http://mini-io.sphinx-butterfly.ts.net:9000 \
   -e MINIO_ACCESS_KEY=thomas \
   -e MINIO_SECRET_KEY='your-secret' \
   -e MINIO_BUCKET=music \

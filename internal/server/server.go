@@ -490,7 +490,7 @@ func (s *Server) serveS3Audio(w http.ResponseWriter, r *http.Request, uri string
 	}
 	defer stream.Body.Close()
 	ctype := stream.ContentType
-	if ctype == "" {
+	if ctype == "" || strings.Contains(ctype, "octet-stream") || strings.Contains(ctype, "binary/") {
 		ctype = s3.ContentTypeForKey(loc.Key)
 	}
 	w.Header().Set("Content-Type", ctype)

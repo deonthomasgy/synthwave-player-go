@@ -780,11 +780,18 @@ document.addEventListener('alpine:init', () => {
 
         // Computed Properties
         get songsToDisplay() {
-            const filtered = this.filteredSongs.filter(song => song);
-            if (this._fullListLoaded) {
-                return filtered;
-            }
-            return filtered.slice(0, this.displayLimit);
+            const list = (this.allSongs || []).filter(song => song);
+            const sliced = this._fullListLoaded ? list : list.slice(0, this.displayLimit);
+            return sliced.map(song => {
+                const newSong = { ...song };
+                newSong.highlighted_title = song.title_html || this.highlight(newSong, 'title');
+                newSong.highlighted_artist = song.artist_html || this.highlight(newSong, 'artist');
+                newSong.highlighted_album = song.album_html || this.highlight(newSong, 'album');
+                if (newSong.year && typeof newSong.year === 'string') {
+                    newSong.year = newSong.year.substring(0, 4);
+                }
+                return newSong;
+            });
         },
         get sortedPlaylists() {
             const playlistNames = Object.keys(this.playlists);
@@ -860,18 +867,7 @@ document.addEventListener('alpine:init', () => {
             return 'text-sm md:text-2xl';
         },
         get filteredSongs() {
-            const songsToList = this.allSongs;
-            return songsToList.map(song => {
-                if (!song) return null;
-                const newSong = { ...song };
-                newSong.highlighted_title = song.title_html || this.highlight(newSong, 'title');
-                newSong.highlighted_artist = song.artist_html || this.highlight(newSong, 'artist');
-                newSong.highlighted_album = song.album_html || this.highlight(newSong, 'album');
-                if (newSong.year && typeof newSong.year === 'string') {
-                    newSong.year = newSong.year.substring(0, 4);
-                }
-                return newSong;
-            });
+            return (this.allSongs || []).filter(song => song);
         },
 
         // Methods
@@ -1639,9 +1635,8 @@ document.addEventListener('alpine:init', () => {
             document.documentElement.style.setProperty('--ui-scale', this.uiScale);
             document.documentElement.style.setProperty('--lyrics-scale', this.lyricsScale);
 
-            this._loadTrackCacheFromStorage().then(() => {
-                this.checkLoadingStatus(); // Will now primarily rely on WebSocket for continuous updates
-            });
+            this.checkLoadingStatus();
+            this._loadTrackCacheFromStorage().catch(() => {});
 
             // Watch for URL changes (like back/forward buttons) and ensure it stays pretty
             window.addEventListener('popstate', () => {
@@ -2027,8 +2022,10 @@ document.addEventListener('alpine:init', () => {
             this.allSongs = [...newSongs];
             this.displayedSongCount = cached.total || newSongs.length;
             this.libraryPageToLoad = 2;
-            this._rebuildFuseIndex();
-            this._expandDisplayToAll();
+            this._fullListLoaded = false;
+            this.displayLimit = this.isMobileMode
+                ? window.SWP_CONFIG.initial_songs_to_load_mobile
+                : window.SWP_CONFIG.initial_songs_to_load_desktop;
             this.viewLoading = false;
         },
         async _loadTrackCacheFromStorage() {
@@ -2097,9 +2094,14 @@ document.addEventListener('alpine:init', () => {
                 const url = new URL(baseUrl);
                 url.searchParams.set('page', page);
 
-                const limit = useBulkDefault
-                    ? SWPTrackCache.CACHE_LIMIT
-                    : (this.shuffle === 'random' ? 0 : (window.SWP_CONFIG.songs_per_page || 5000));
+                const pageSize = this.isMobileMode
+                    ? (window.SWP_CONFIG.initial_songs_to_load_mobile || 30)
+                    : (window.SWP_CONFIG.songs_per_page || 100);
+                const limit = this.isInitializing
+                    ? pageSize
+                    : (useBulkDefault
+                        ? SWPTrackCache.CACHE_LIMIT
+                        : (this.shuffle === 'random' ? 0 : pageSize));
                 url.searchParams.set('limit', limit);
 
                 if (isSearch) {
@@ -2161,10 +2163,9 @@ document.addEventListener('alpine:init', () => {
                 this.displayedSongCount = data.total || 0;
                 this.libraryPageToLoad = page + 1;
 
-                if (useBulkDefault && !append) {
-                    this._expandDisplayToAll();
+                if (useBulkDefault && !append && !this.isInitializing) {
                     this.isLoadingMoreSongs = false;
-                    await this._saveTrackCache(data.total);
+                    this._saveTrackCache(data.total);
                 }
 
                 // Reset loading state if we've reached the end
@@ -2434,6 +2435,7 @@ document.addEventListener('alpine:init', () => {
                 this.loading = false;
                 this.loadingMessage = 'Loaded!';
                 this.loadingProgress = 100;
+                await this.$nextTick();
 
                 // Defer loading of artists and albums to speed up initial load, especially on mobile.
                 const [playlistsRes, genresRes] = await Promise.all([
@@ -2458,7 +2460,7 @@ document.addEventListener('alpine:init', () => {
                 // Now that basic metadata is loaded, finish parsing URL parameters and fetch songs.
                 this._sidebarMetadataLoaded = true;
                 if (this.isInitializing) {
-                    this.finishLoading();
+                    await this.finishLoading();
                 } else {
                     const canUseCachedTracks = typeof SWPTrackCache !== 'undefined'
                         && SWPTrackCache.isDefaultView(this)
@@ -2828,7 +2830,8 @@ document.addEventListener('alpine:init', () => {
 
                 // Fix: Don't reset duration to 0 if we already have it from the library data.
                 // This prevents the "00:00" bug on mobile while metadata is loading.
-                if (song.duration && song.duration > 0 && !song.is_radio) {
+                // 999999998 is the S3 "unknown duration" placeholder, not a real length.
+                if (song.duration && song.duration > 0 && song.duration !== 999999998 && !song.is_radio) {
                     this.duration = song.duration;
                 } else {
                     this.duration = song.is_radio ? Infinity : 0;

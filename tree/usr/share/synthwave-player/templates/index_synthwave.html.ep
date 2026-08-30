@@ -1241,7 +1241,7 @@ window.SWP_CONFIG = {
     track_cache_limit: 10000,
 };
 </script>
-<script src="/track-cache.js?v=<%= $app_version %>"></script>
-<script src="/synthwaveplayer.js?v=<%= $app_version %>"></script>
+<script src="/track-cache.js?v=<%= $app_version %>-ui1"></script>
+<script src="/synthwaveplayer.js?v=<%= $app_version %>-ui1"></script>
 </body>
 </html>

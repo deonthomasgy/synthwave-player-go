@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError
 
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/mnt/share/640GB/Music_Deon")
 BUCKET = os.environ.get("MINIO_BUCKET", "music")
-ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://truenas-scale.sphinx-butterfly.ts.net:9000")
+ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://mini-io.sphinx-butterfly.ts.net:9000")
 ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "thomas")
 SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "")
 WORKERS = int(os.environ.get("UPLOAD_WORKERS", "8"))

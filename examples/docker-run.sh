@@ -14,7 +14,7 @@ IMAGE="${IMAGE:-princeamd/synthwave-player:3.6}"
 
 # MinIO/S3 music (optional). When set, the server auto-adds s3://music/ to MUSIC_DIRECTORIES
 # unless SYNTHWAVE_USE_S3_MUSIC=0. Set MINIO_SECRET_KEY in your shell or a .env file.
-MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://truenas-scale.sphinx-butterfly.ts.net:9000}"
+MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://mini-io.sphinx-butterfly.ts.net:9000}"
 MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY:-thomas}"
 MINIO_SECRET_KEY="${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY before running}"
 MINIO_BUCKET="${MINIO_BUCKET:-music}"
