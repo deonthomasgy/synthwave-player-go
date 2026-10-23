@@ -1,6 +1,6 @@
 module github.com/Elive/synthwave-player
 
-go 1.26.3
+go 1.27.3
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
