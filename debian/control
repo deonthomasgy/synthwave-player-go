@@ -5,7 +5,7 @@ Maintainer: Thanatermesis <thanatermesis@elivecd.org>
 Standards-Version: 4.6.2
 Homepage: https://github.com/deonthomasgy/synthwave-player-go
 Build-Depends: debhelper (>= 12),
-               golang-go (>= 2:1.21~),
+               golang-go (>= 2:1.27.3~) <!pkg.synthwave-player.external-go>,
                file,
                eyed3,
                exiftool,

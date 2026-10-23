@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: debian:12
+      image: golang:1.27.3-bookworm
 
     steps:
     - name: Checkout repository
@@ -19,11 +19,12 @@ jobs:
     - name: Install build dependencies
       run: |
         apt-get update
-        apt-get install -y devscripts equivs build-essential golang-go
-        mk-build-deps -i -t "apt-get -y --no-install-recommends" debian/control
+        apt-get install -y devscripts equivs build-essential
+        go version
+        mk-build-deps -P pkg.synthwave-player.external-go -i -t "apt-get -y --no-install-recommends" debian/control
 
     - name: Build packages
-      run: debuild --no-tgz-check -us -uc
+      run: debuild --no-tgz-check -Ppkg.synthwave-player.external-go -us -uc
 
     - name: Workaround actions/upload-artifact#176
       run: |
